@@ -179,6 +179,63 @@ is_timeout_reached() {
     fi
 }
 
+# Function to calculate inactivity period
+get_inactivity_info() {
+    local last_activity=$(get_last_activity)
+    local current_time=$(date +%s)
+    local elapsed_time=$((current_time - last_activity))
+    local elapsed_minutes=$((elapsed_time / 60))
+    local remaining_minutes=$((INACTIVITY_TIMEOUT - elapsed_minutes))
+    
+    echo "$elapsed_minutes $remaining_minutes"
+}
+
+# Function to initiate shutdown
+initiate_shutdown() {
+    local last_activity=$(get_last_activity)
+    local last_activity_human=$(date -d @$last_activity '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r $last_activity '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$last_activity")
+    
+    log_message "WARNING: No monitored processes have been active since $last_activity_human ($INACTIVITY_TIMEOUT minutes timeout reached)"
+    log_message "Initiating system shutdown in $SHUTDOWN_DELAY minute(s)"
+    
+    # Notify all users about the shutdown
+    notify_users "System will shut down in $SHUTDOWN_DELAY minute(s) due to process inactivity for $INACTIVITY_TIMEOUT minutes"
+    
+    # Log the shutdown event
+    log_message "Executing shutdown command"
+    
+    # Initiate shutdown - try different commands based on what's available
+    if command -v shutdown >/dev/null 2>&1; then
+        if ! shutdown -h +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null; then
+            if ! shutdown +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null; then
+                log_message "ERROR: Failed to execute shutdown command"
+                notify_users "ERROR: Failed to execute shutdown command"
+                return 1
+            fi
+        fi
+    elif command -v poweroff >/dev/null 2>&1; then
+        # Some systems might not have shutdown but have poweroff
+        # Schedule it with at if available, otherwise just log and continue
+        if command -v at >/dev/null 2>&1; then
+            if ! echo "poweroff" | at now + $SHUTDOWN_DELAY minutes 2>/dev/null; then
+                log_message "ERROR: Failed to schedule poweroff command"
+                notify_users "ERROR: Failed to schedule poweroff command"
+                return 1
+            fi
+        else
+            log_message "WARNING: No suitable shutdown command found, continuing monitoring"
+            notify_users "WARNING: System would have shut down, but no suitable shutdown command was found"
+            return 1
+        fi
+    else
+        log_message "ERROR: No shutdown or poweroff command available"
+        notify_users "ERROR: Cannot shut down system - no shutdown command available"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Main monitoring loop
 while true; do
     # Check if any monitored process is running
@@ -190,59 +247,17 @@ while true; do
         
         # Check if inactivity timeout has been reached
         if is_timeout_reached; then
-            local last_activity=$(get_last_activity)
-            local last_activity_human=$(date -d @$last_activity '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r $last_activity '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$last_activity")
-            
-            log_message "WARNING: No monitored processes have been active since $last_activity_human ($INACTIVITY_TIMEOUT minutes timeout reached)"
-            log_message "Initiating system shutdown in $SHUTDOWN_DELAY minute(s)"
-            
-            # Notify all users about the shutdown
-            notify_users "System will shut down in $SHUTDOWN_DELAY minute(s) due to process inactivity for $INACTIVITY_TIMEOUT minutes"
-            
-            # Log the shutdown event
-            log_message "Executing shutdown command"
-            
-            # Initiate shutdown - try different commands based on what's available
-            if command -v shutdown >/dev/null 2>&1; then
-                if ! shutdown -h +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null; then
-                    if ! shutdown +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null; then
-                        log_message "ERROR: Failed to execute shutdown command"
-                        notify_users "ERROR: Failed to execute shutdown command"
-                        sleep 300
-                        continue
-                    fi
-                fi
-            elif command -v poweroff >/dev/null 2>&1; then
-                # Some systems might not have shutdown but have poweroff
-                # Schedule it with at if available, otherwise just log and continue
-                if command -v at >/dev/null 2>&1; then
-                    if ! echo "poweroff" | at now + $SHUTDOWN_DELAY minutes 2>/dev/null; then
-                        log_message "ERROR: Failed to schedule poweroff command"
-                        notify_users "ERROR: Failed to schedule poweroff command"
-                        sleep 300
-                        continue
-                    fi
-                else
-                    log_message "WARNING: No suitable shutdown command found, continuing monitoring"
-                    notify_users "WARNING: System would have shut down, but no suitable shutdown command was found"
-                    sleep 300
-                    continue
-                fi
+            if initiate_shutdown; then
+                # Exit the script if shutdown was initiated successfully
+                exit 0
             else
-                log_message "ERROR: No shutdown or poweroff command available"
-                notify_users "ERROR: Cannot shut down system - no shutdown command available"
+                # Wait before trying again
                 sleep 300
-                continue
             fi
-            
-            # Exit the script
-            exit 0
         else
-            local last_activity=$(get_last_activity)
-            local current_time=$(date +%s)
-            local elapsed_time=$((current_time - last_activity))
-            local elapsed_minutes=$((elapsed_time / 60))
-            local remaining_minutes=$((INACTIVITY_TIMEOUT - elapsed_minutes))
+            # Get inactivity information
+            inactivity_info=$(get_inactivity_info)
+            read elapsed_minutes remaining_minutes <<< "$inactivity_info"
             
             log_message "Inactivity period: $elapsed_minutes minutes (shutdown in $remaining_minutes more minutes of inactivity)"
         fi
