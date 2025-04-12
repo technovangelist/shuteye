@@ -6,19 +6,21 @@
 # Load configuration
 CONFIG_FILE="/etc/shuteye/shuteye.conf"
 if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
+    # Source the configuration file
+    . "$CONFIG_FILE"
 else
     echo "Configuration file not found at $CONFIG_FILE" >&2
     exit 1
 fi
 
 # Set defaults if not specified in config
-PROCESSES_TO_MONITOR="${PROCESSES_TO_MONITOR:-ollama,invoke}"
-INACTIVITY_TIMEOUT="${INACTIVITY_TIMEOUT:-60}"
-LOG_FILE="${LOG_FILE:-/var/log/shuteye.log}"
-NOTIFICATION_METHOD="${NOTIFICATION_METHOD:-wall}"
-SHUTDOWN_DELAY="${SHUTDOWN_DELAY:-1}"
-CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
+# Remove quotes if present
+PROCESSES_TO_MONITOR=$(echo "${PROCESSES_TO_MONITOR:-ollama,invoke}" | tr -d '"')
+INACTIVITY_TIMEOUT=$(echo "${INACTIVITY_TIMEOUT:-60}" | tr -d '"')
+LOG_FILE=$(echo "${LOG_FILE:-/var/log/shuteye.log}" | tr -d '"')
+NOTIFICATION_METHOD=$(echo "${NOTIFICATION_METHOD:-wall}" | tr -d '"')
+SHUTDOWN_DELAY=$(echo "${SHUTDOWN_DELAY:-1}" | tr -d '"')
+CHECK_INTERVAL=$(echo "${CHECK_INTERVAL:-60}" | tr -d '"')
 
 # Create a state file to track last activity time
 STATE_DIR="/var/lib/shuteye"
