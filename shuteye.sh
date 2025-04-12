@@ -3,15 +3,12 @@
 # Process Monitor and Auto-Shutdown Service
 # Monitors specified processes and shuts down the system after inactivity
 
-# Exit on error
-set -e
-
 # Load configuration
 CONFIG_FILE="/etc/shuteye/shuteye.conf"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 else
-    echo "Configuration file not found at $CONFIG_FILE"
+    echo "Configuration file not found at $CONFIG_FILE" >&2
     exit 1
 fi
 
@@ -29,14 +26,14 @@ log_message() {
     # Ensure log directory exists
     if [ ! -d "$log_dir" ]; then
         mkdir -p "$log_dir" 2>/dev/null || {
-            echo "Error: Cannot create log directory $log_dir"
+            echo "Error: Cannot create log directory $log_dir" >&2
             return 1
         }
-    }
+    fi
     
     # Attempt to write to log file
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE" 2>/dev/null || {
-        echo "Error: Cannot write to log file $LOG_FILE"
+        echo "Error: Cannot write to log file $LOG_FILE" >&2
         return 1
     }
     
@@ -57,6 +54,8 @@ notify_users() {
             done
             ;;
         *)
+            # Default to wall if notification method is not recognized
+            log_message "Warning: Unknown notification method '$NOTIFICATION_METHOD', defaulting to wall"
             wall "$message" 2>/dev/null || log_message "Warning: Failed to send notification"
             ;;
     esac
@@ -64,13 +63,13 @@ notify_users() {
 
 # Create log directory if it doesn't exist
 mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || {
-    echo "Error: Cannot create log directory $(dirname "$LOG_FILE")"
+    echo "Error: Cannot create log directory $(dirname "$LOG_FILE")" >&2
     exit 1
 }
 
 # Ensure log file is writable
 touch "$LOG_FILE" 2>/dev/null || {
-    echo "Error: Cannot create log file $LOG_FILE"
+    echo "Error: Cannot create log file $LOG_FILE" >&2
     exit 1
 }
 
@@ -81,51 +80,14 @@ log_message "Notification method: $NOTIFICATION_METHOD"
 log_message "Shutdown delay: $SHUTDOWN_DELAY minute(s)"
 
 # Function to check if a process is active
-check_process_activity() {
+is_process_running() {
     local process="$1"
-    local timeout="$2"
-    
     # Trim whitespace
     process=$(echo "$process" | xargs)
     
-    # Method 1: Check if process is currently running
-    if pgrep -f "$process" > /dev/null; then
-        log_message "Process '$process' is currently running"
-        return 0
-    fi
-    
-    # Method 2: Check process start time from ps history
-    if ps -eo lstart,cmd | grep -v grep | grep -i "$process" | awk '{print $1,$2,$3,$4,$5}' | while read -r datetime; do
-        start_time=$(date -d "$datetime" +%s 2>/dev/null) || start_time=$(date -j -f "%a %b %d %T %Y" "$datetime" +%s 2>/dev/null)
-        current_time=$(date +%s)
-        elapsed_time=$((current_time - start_time))
-        max_elapsed_time=$((timeout * 60))
-        
-        if [ "$elapsed_time" -le "$max_elapsed_time" ]; then
-            return 0
-        fi
-    done; then
-        log_message "Process '$process' ran within the last $timeout minutes (ps history)"
-        return 0
-    fi
-    
-    # Method 3: Check systemd journal
-    local since_time="$timeout minutes ago"
-    if journalctl -t "$process" --since "$since_time" 2>/dev/null | grep -q .; then
-        log_message "Process '$process' ran within the last $timeout minutes (journal)"
-        return 0
-    fi
-    
-    # Method 4: Check system process accounting (if available)
-    if command -v lastcomm >/dev/null 2>&1; then
-        if lastcomm "$process" 2>/dev/null | head -n 1 | grep -q .; then
-            # Note: lastcomm doesn't easily allow filtering by time, so this is approximate
-            log_message "Process '$process' has run recently (process accounting)"
-            return 0
-        fi
-    fi
-    
-    return 1
+    # Use pgrep with -f to match against the full command line
+    pgrep -f "$process" >/dev/null 2>&1
+    return $?
 }
 
 # Main monitoring loop
@@ -137,9 +99,15 @@ while true; do
     IFS=',' read -ra PROCESS_LIST <<< "$PROCESSES_TO_MONITOR"
     
     for PROCESS in "${PROCESS_LIST[@]}"; do
-        if check_process_activity "$PROCESS" "$INACTIVITY_TIMEOUT"; then
+        # Trim whitespace
+        PROCESS=$(echo "$PROCESS" | xargs)
+        
+        if is_process_running "$PROCESS"; then
+            log_message "Process '$PROCESS' is currently running"
             PROCESS_FOUND=true
             break
+        else
+            log_message "Process '$PROCESS' is not currently running"
         fi
     done
     
@@ -153,15 +121,41 @@ while true; do
         # Log the shutdown event
         log_message "Executing shutdown command"
         
-        # Initiate shutdown
-        shutdown -h +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" || {
-            log_message "ERROR: Failed to execute shutdown command"
-            notify_users "ERROR: Failed to execute shutdown command"
-            
-            # Wait before trying again
+        # Initiate shutdown - try different commands based on what's available
+        if command -v shutdown >/dev/null 2>&1; then
+            shutdown -h +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null || 
+            shutdown +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null ||
+            {
+                log_message "ERROR: Failed to execute shutdown command"
+                notify_users "ERROR: Failed to execute shutdown command"
+                
+                # Wait before trying again
+                sleep 300
+                continue
+            }
+        elif command -v poweroff >/dev/null 2>&1; then
+            # Some systems might not have shutdown but have poweroff
+            # Schedule it with at if available, otherwise just log and continue
+            if command -v at >/dev/null 2>&1; then
+                echo "poweroff" | at now + $SHUTDOWN_DELAY minutes 2>/dev/null ||
+                {
+                    log_message "ERROR: Failed to schedule poweroff command"
+                    notify_users "ERROR: Failed to schedule poweroff command"
+                    sleep 300
+                    continue
+                }
+            else
+                log_message "WARNING: No suitable shutdown command found, continuing monitoring"
+                notify_users "WARNING: System would have shut down, but no suitable shutdown command was found"
+                sleep 300
+                continue
+            fi
+        else
+            log_message "ERROR: No shutdown or poweroff command available"
+            notify_users "ERROR: Cannot shut down system - no shutdown command available"
             sleep 300
             continue
-        }
+        fi
         
         # Exit the script
         exit 0

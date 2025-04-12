@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/shuteye.sh
+ExecStart=/bin/bash /usr/local/bin/shuteye.sh
 Restart=on-failure
-RestartSec=10
+RestartSec=30
 StandardOutput=append:/var/log/shuteye.log
 StandardError=append:/var/log/shuteye.log
 
