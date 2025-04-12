@@ -25,17 +25,17 @@ log_message() {
     
     # Ensure log directory exists
     if [ ! -d "$log_dir" ]; then
-        mkdir -p "$log_dir" 2>/dev/null || {
+        if ! mkdir -p "$log_dir" 2>/dev/null; then
             echo "Error: Cannot create log directory $log_dir" >&2
             return 1
-        }
+        fi
     fi
     
     # Attempt to write to log file
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE" 2>/dev/null || {
+    if ! echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE" 2>/dev/null; then
         echo "Error: Cannot write to log file $LOG_FILE" >&2
         return 1
-    }
+    fi
     
     return 0
 }
@@ -46,7 +46,9 @@ notify_users() {
     
     case "$NOTIFICATION_METHOD" in
         wall)
-            wall "$message" 2>/dev/null || log_message "Warning: Failed to send wall notification"
+            if ! wall "$message" 2>/dev/null; then
+                log_message "Warning: Failed to send wall notification"
+            fi
             ;;
         notify-send)
             for user in $(who | cut -d' ' -f1 | sort | uniq); do
@@ -56,22 +58,24 @@ notify_users() {
         *)
             # Default to wall if notification method is not recognized
             log_message "Warning: Unknown notification method '$NOTIFICATION_METHOD', defaulting to wall"
-            wall "$message" 2>/dev/null || log_message "Warning: Failed to send notification"
+            if ! wall "$message" 2>/dev/null; then
+                log_message "Warning: Failed to send notification"
+            fi
             ;;
     esac
 }
 
 # Create log directory if it doesn't exist
-mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || {
+if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then
     echo "Error: Cannot create log directory $(dirname "$LOG_FILE")" >&2
     exit 1
-}
+fi
 
 # Ensure log file is writable
-touch "$LOG_FILE" 2>/dev/null || {
+if ! touch "$LOG_FILE" 2>/dev/null; then
     echo "Error: Cannot create log file $LOG_FILE" >&2
     exit 1
-}
+fi
 
 log_message "Shuteye service started"
 log_message "Monitoring processes: $PROCESSES_TO_MONITOR"
@@ -123,27 +127,24 @@ while true; do
         
         # Initiate shutdown - try different commands based on what's available
         if command -v shutdown >/dev/null 2>&1; then
-            shutdown -h +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null || 
-            shutdown +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null ||
-            {
-                log_message "ERROR: Failed to execute shutdown command"
-                notify_users "ERROR: Failed to execute shutdown command"
-                
-                # Wait before trying again
-                sleep 300
-                continue
-            }
+            if ! shutdown -h +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null; then
+                if ! shutdown +$SHUTDOWN_DELAY "Automatic shutdown due to process inactivity" 2>/dev/null; then
+                    log_message "ERROR: Failed to execute shutdown command"
+                    notify_users "ERROR: Failed to execute shutdown command"
+                    sleep 300
+                    continue
+                fi
+            fi
         elif command -v poweroff >/dev/null 2>&1; then
             # Some systems might not have shutdown but have poweroff
             # Schedule it with at if available, otherwise just log and continue
             if command -v at >/dev/null 2>&1; then
-                echo "poweroff" | at now + $SHUTDOWN_DELAY minutes 2>/dev/null ||
-                {
+                if ! echo "poweroff" | at now + $SHUTDOWN_DELAY minutes 2>/dev/null; then
                     log_message "ERROR: Failed to schedule poweroff command"
                     notify_users "ERROR: Failed to schedule poweroff command"
                     sleep 300
                     continue
-                }
+                fi
             else
                 log_message "WARNING: No suitable shutdown command found, continuing monitoring"
                 notify_users "WARNING: System would have shut down, but no suitable shutdown command was found"
