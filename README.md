@@ -31,6 +31,7 @@ sudo nano /etc/shuteye/shuteye.conf
   - ⁠LOG_FILE: Path to the log file
   - ⁠NOTIFICATION_METHOD: Method used to notify users (wall, notify-send)
   - ⁠SHUTDOWN_DELAY: Number of minutes between notification and actual shutdown
+  - ⁠CHECK_INTERVAL: How often to check for process activity (in seconds)
 
 ## Usage
 
