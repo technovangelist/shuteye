@@ -95,15 +95,52 @@ log_message "Notification method: $NOTIFICATION_METHOD"
 log_message "Shutdown delay: $SHUTDOWN_DELAY minute(s)"
 log_message "Check interval: $CHECK_INTERVAL seconds"
 
-# Function to check if a process is active
+# Function to check if a specific process is active
 is_process_running() {
-    local process="$1"
+    local process_pattern="$1"
     # Trim whitespace
-    process=$(echo "$process" | xargs)
+    process_pattern=$(echo "$process_pattern" | xargs)
     
-    # Use pgrep with -f to match against the full command line
-    pgrep -f "$process" >/dev/null 2>&1
-    return $?
+    # Split the pattern into words to check for multi-word patterns
+    read -ra PATTERN_WORDS <<< "$process_pattern"
+    
+    if [ ${#PATTERN_WORDS[@]} -gt 1 ]; then
+        # For multi-word patterns, we need to be more precise
+        # Example: "ollama runner" should match processes containing both words in order
+        if ps aux | grep -v "grep" | grep -E "$process_pattern" > /dev/null 2>&1; then
+            log_message "Found match for multi-word process: '$process_pattern'"
+            return 0  # Process is running
+        fi
+    else
+        # For single-word patterns, we check if it's the command or part of the command line
+        # Example: "runner" should match "/usr/local/bin/ollama runner ..."
+        if ps aux | grep -v "grep" | grep -E "(^| )$process_pattern( |$)" > /dev/null 2>&1; then
+            log_message "Found match for process: '$process_pattern'"
+            return 0  # Process is running
+        fi
+    fi
+    
+    return 1  # Process is not running
+}
+
+# Function to check all monitored processes
+check_monitored_processes() {
+    # Convert comma-separated list to array
+    IFS=',' read -ra PROCESS_LIST <<< "$PROCESSES_TO_MONITOR"
+    
+    for PROCESS in "${PROCESS_LIST[@]}"; do
+        # Trim whitespace
+        PROCESS=$(echo "$PROCESS" | xargs)
+        
+        if is_process_running "$PROCESS"; then
+            log_message "Process '$PROCESS' is currently running"
+            return 0  # At least one monitored process is running
+        else
+            log_message "Process '$PROCESS' is not currently running"
+        fi
+    done
+    
+    return 1  # No monitored processes are running
 }
 
 # Function to update the last activity timestamp
@@ -142,28 +179,11 @@ is_timeout_reached() {
 
 # Main monitoring loop
 while true; do
-    # Flag to track if any monitored process is running
-    PROCESS_FOUND=false
-    
-    # Convert comma-separated list to array
-    IFS=',' read -ra PROCESS_LIST <<< "$PROCESSES_TO_MONITOR"
-    
-    for PROCESS in "${PROCESS_LIST[@]}"; do
-        # Trim whitespace
-        PROCESS=$(echo "$PROCESS" | xargs)
-        
-        if is_process_running "$PROCESS"; then
-            log_message "Process '$PROCESS' is currently running"
-            PROCESS_FOUND=true
-            # Update the last activity time
-            update_last_activity
-            break
-        else
-            log_message "Process '$PROCESS' is not currently running"
-        fi
-    done
-    
-    if [ "$PROCESS_FOUND" = false ]; then
+    # Check if any monitored process is running
+    if check_monitored_processes; then
+        # Update the last activity time
+        update_last_activity
+    else
         log_message "No monitored processes are currently running"
         
         # Check if inactivity timeout has been reached
