@@ -17,16 +17,20 @@ Install with a single command:
 ```bash
 curl -s https://raw.githubusercontent.com/technovangelist/shuteye/main/install.sh | sudo sh
 ```
- 
+
  ## Configuration
 
 After installation, edit the configuration file:
- sudo nano /etc/process-monitor/config.conf
- 
+```bash
+sudo nano /etc/shuteye/shuteye.conf
+```
+
 ### Configuration Options
   - ⁠PROCESSES_TO_MONITOR: Comma-separated list of process names to monitor
   - ⁠INACTIVITY_TIMEOUT: Number of minutes of inactivity before shutdown
   - ⁠LOG_FILE: Path to the log file
+  - ⁠NOTIFICATION_METHOD: Method used to notify users (wall, notify-send)
+  - ⁠SHUTDOWN_DELAY: Number of minutes between notification and actual shutdown
 
 ## Usage
 
@@ -46,10 +50,10 @@ sudo systemctl restart shuteye.service
 sudo systemctl stop shuteye.service
 ```
 
- ## Uninstallation
+## Uninstallation
  
 ```bash
- sudo systemctl stop shuteye.service
+sudo systemctl stop shuteye.service
 sudo systemctl disable shuteye.service
 sudo rm /etc/systemd/system/shuteye.service
 sudo rm /usr/local/bin/shuteye.sh
@@ -57,18 +61,17 @@ sudo rm -r /etc/shuteye
 sudo systemctl daemon-reload
 ```
 
- ## License
+## License
 
 MIT License
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
- 
+
 ## One-Line Installation Command
 
 With this repository structure, users can install your service with a single command:
-
 ```bash
 curl -s https://raw.githubusercontent.com/technovangelist/shuteye/main/install.sh | sudo sh
 ```

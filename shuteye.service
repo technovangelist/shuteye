@@ -1,0 +1,14 @@
+[Unit]
+Description=Shuteye Process Monitor and Auto-Shutdown Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/shuteye.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/shuteye.log
+StandardError=append:/var/log/shuteye.log
+
+[Install]
+WantedBy=multi-user.target
