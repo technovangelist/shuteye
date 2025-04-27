@@ -96,8 +96,6 @@ log_message "Inactivity timeout: $INACTIVITY_TIMEOUT minutes"
 log_message "Notification method: $NOTIFICATION_METHOD"
 log_message "Shutdown delay: $SHUTDOWN_DELAY minute(s)"
 log_message "Check interval: $CHECK_INTERVAL seconds"
-# Reset inactivity timer at service startup
-update_last_activity
 
 # Function to check if a specific process is active
 is_process_running() {
@@ -237,6 +235,9 @@ initiate_shutdown() {
     
     return 0
 }
+
+# Reset inactivity timer at service startup
+update_last_activity
 
 # Main monitoring loop
 while true; do
